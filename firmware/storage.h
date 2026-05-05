@@ -15,6 +15,8 @@
 struct Link {
   String name;
   String url;
+  String username;   // login username/email
+  String password;   // login password
   String cat;        // category name
   uint32_t lastUsed; // millis since epoch (cheap "last used" tracking)
   uint32_t timesUsed;

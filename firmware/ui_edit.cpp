@@ -13,6 +13,7 @@
 
 extern void uiList_show();
 extern void uiTransmit_url(const String& url);
+extern void uiTransmit_creds(const String& username, const String& password);
 
 namespace UIEdit {
 
@@ -21,19 +22,62 @@ namespace UIEdit {
 // =========================================================================
 struct EditLinkCtx {
   Link* link;
+  String urlBuffer;
   String nameBuffer;
+  String usernameBuffer;
+  String passwordBuffer;
   String selectedCat;
+  int focusedField;   // 0=url, 1=name, 2=username, 3=password
+  bool isNew;         // true = erase link on cancel
   std::function<void()> onClose;
   lv_obj_t* overlay;
+  lv_obj_t* urlDisplay;
   lv_obj_t* nameDisplay;
+  lv_obj_t* usernameDisplay;
+  lv_obj_t* passwordDisplay;
   lv_obj_t* pillsContainer;
 };
 static EditLinkCtx* g_editCtx = nullptr;
 
-static void renderLinkPills();
-static void renderLinkName();
+static void buildLinkPills();
+static void setFocus(int field);
+static void renderAllFields();
 static void closeLinkEdit(bool deleted);
 static void saveLinkEdit();
+
+static String* activeBuffer() {
+  if (!g_editCtx) return nullptr;
+  switch (g_editCtx->focusedField) {
+    case 0: return &g_editCtx->urlBuffer;
+    case 2: return &g_editCtx->usernameBuffer;
+    case 3: return &g_editCtx->passwordBuffer;
+    default: return &g_editCtx->nameBuffer;
+  }
+}
+
+static void renderAllFields() {
+  if (!g_editCtx) return;
+  lv_label_set_text(g_editCtx->urlDisplay,      g_editCtx->urlBuffer.c_str());
+  lv_label_set_text(g_editCtx->nameDisplay,     g_editCtx->nameBuffer.c_str());
+  lv_label_set_text(g_editCtx->usernameDisplay, g_editCtx->usernameBuffer.c_str());
+  // Password always masked
+  String mask(g_editCtx->passwordBuffer.length(), '*');
+  lv_label_set_text(g_editCtx->passwordDisplay, mask.length() ? mask.c_str() : "");
+}
+
+static void setFocus(int field) {
+  if (!g_editCtx) return;
+  g_editCtx->focusedField = field;
+  lv_obj_t* displays[4] = {
+    g_editCtx->urlDisplay,
+    g_editCtx->nameDisplay,
+    g_editCtx->usernameDisplay,
+    g_editCtx->passwordDisplay
+  };
+  for (int i = 0; i < 4; i++) {
+    lv_obj_set_style_border_color(displays[i], (i == field) ? COLOR_ACCENT : COLOR_DIM, 0);
+  }
+}
 
 static void buildLinkPills() {
   if (!g_editCtx) return;
@@ -88,15 +132,18 @@ static void buildLinkPills() {
   }, LV_EVENT_CLICKED, NULL);
 }
 
-static void renderLinkPills() { buildLinkPills(); }
-
-static void renderLinkName() {
-  if (!g_editCtx) return;
-  lv_label_set_text(g_editCtx->nameDisplay, g_editCtx->nameBuffer.c_str());
-}
-
 static void closeLinkEdit(bool deleted) {
   if (!g_editCtx) return;
+  // A new link that was never saved (cancel, not delete) gets erased from the vault.
+  if (g_editCtx->isNew && !deleted) {
+    if (App::currentVault) {
+      auto& links = App::currentVault->links;
+      for (auto it = links.begin(); it != links.end(); ++it) {
+        if (&(*it) == g_editCtx->link) { links.erase(it); break; }
+      }
+      Vaults::persist();
+    }
+  }
   auto cb = g_editCtx->onClose;
   lv_obj_del(g_editCtx->overlay);
   delete g_editCtx;
@@ -107,21 +154,59 @@ static void closeLinkEdit(bool deleted) {
 static void saveLinkEdit() {
   if (!g_editCtx) return;
   App::notifyActivity();
+  g_editCtx->link->url      = g_editCtx->urlBuffer;
   String trimmed = g_editCtx->nameBuffer;
   trimmed.trim();
   if (trimmed.length() > 0) g_editCtx->link->name = trimmed;
-  g_editCtx->link->cat = g_editCtx->selectedCat;
+  g_editCtx->link->username = g_editCtx->usernameBuffer;
+  g_editCtx->link->password = g_editCtx->passwordBuffer;
+  g_editCtx->link->cat      = g_editCtx->selectedCat;
   Vaults::persist();
+  g_editCtx->isNew = false;  // saved — cancel no longer erases
   closeLinkEdit(false);
 }
 
-void editLink(Link* link, std::function<void()> onClose) {
+// Build a labeled field row: small label on left, tappable display on right.
+// Returns the display object. field = focus index passed to setFocus.
+static lv_obj_t* buildField(lv_obj_t* parent, const char* labelText, int y, int field) {
+  lv_obj_t* lab = lv_label_create(parent);
+  lv_label_set_text(lab, labelText);
+  lv_obj_set_style_text_color(lab, COLOR_DIM, 0);
+  lv_obj_set_pos(lab, 0, y + 3);
+
+  lv_obj_t* disp = lv_label_create(parent);
+  lv_obj_set_size(disp, 192, 16);
+  lv_obj_set_pos(disp, 38, y);
+  lv_obj_set_style_bg_color(disp, COLOR_ROW, 0);
+  lv_obj_set_style_bg_opa(disp, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(disp, 1, 0);
+  lv_obj_set_style_border_color(disp, COLOR_DIM, 0);
+  lv_obj_set_style_pad_hor(disp, 4, 0);
+  lv_obj_set_style_pad_ver(disp, 1, 0);
+  lv_obj_set_style_text_color(disp, COLOR_FG, 0);
+  lv_obj_set_style_radius(disp, 0, 0);
+  lv_label_set_long_mode(disp, LV_LABEL_LONG_DOT);
+  lv_label_set_text(disp, "");
+  lv_obj_add_flag(disp, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_user_data(disp, (void*)(intptr_t)field);
+  lv_obj_add_event_cb(disp, [](lv_event_t* e){
+    setFocus((int)(intptr_t)lv_obj_get_user_data(lv_event_get_target(e)));
+  }, LV_EVENT_CLICKED, NULL);
+  return disp;
+}
+
+void editLink(Link* link, std::function<void()> onClose, bool isNew) {
   if (g_editCtx) closeLinkEdit(false);
   g_editCtx = new EditLinkCtx();
-  g_editCtx->link = link;
-  g_editCtx->nameBuffer = link->name;
-  g_editCtx->selectedCat = link->cat;
-  g_editCtx->onClose = onClose;
+  g_editCtx->link            = link;
+  g_editCtx->urlBuffer       = link->url;
+  g_editCtx->nameBuffer      = link->name;
+  g_editCtx->usernameBuffer  = link->username;
+  g_editCtx->passwordBuffer  = link->password;
+  g_editCtx->selectedCat     = link->cat;
+  g_editCtx->focusedField    = 1;  // start focus on name
+  g_editCtx->isNew           = isNew;
+  g_editCtx->onClose         = onClose;
 
   g_editCtx->overlay = lv_obj_create(lv_layer_top());
   lv_obj_set_size(g_editCtx->overlay, SCREEN_W, SCREEN_H);
@@ -132,7 +217,7 @@ void editLink(Link* link, std::function<void()> onClose) {
   lv_obj_set_style_pad_all(g_editCtx->overlay, 4, 0);
   lv_obj_clear_flag(g_editCtx->overlay, LV_OBJ_FLAG_SCROLLABLE);
 
-  // Title bar with CLOSE
+  // Title bar
   lv_obj_t* tb = lv_obj_create(g_editCtx->overlay);
   lv_obj_set_size(tb, SCREEN_W - 8, 16);
   lv_obj_set_pos(tb, 0, 0);
@@ -142,7 +227,7 @@ void editLink(Link* link, std::function<void()> onClose) {
   lv_obj_clear_flag(tb, LV_OBJ_FLAG_SCROLLABLE);
 
   lv_obj_t* title = lv_label_create(tb);
-  String tt = "// EDIT :: " + link->name;
+  String tt = isNew ? String("// NEW LINK") : ("// EDIT :: " + link->name);
   lv_label_set_text(title, tt.c_str());
   lv_obj_set_style_text_color(title, COLOR_ACCENT, 0);
   lv_obj_align(title, LV_ALIGN_LEFT_MID, 4, 0);
@@ -161,7 +246,7 @@ void editLink(Link* link, std::function<void()> onClose) {
   lv_obj_center(cl);
   lv_obj_add_event_cb(close, [](lv_event_t* e){ closeLinkEdit(false); }, LV_EVENT_CLICKED, NULL);
 
-  // Left column: URL display, name field, category pills
+  // Left column: 4 editable fields + category pills
   lv_obj_t* left = lv_obj_create(g_editCtx->overlay);
   lv_obj_set_size(left, 240, 130);
   lv_obj_set_pos(left, 0, 18);
@@ -170,49 +255,29 @@ void editLink(Link* link, std::function<void()> onClose) {
   lv_obj_set_style_pad_all(left, 2, 0);
   lv_obj_clear_flag(left, LV_OBJ_FLAG_SCROLLABLE);
 
-  lv_obj_t* urlLab = lv_label_create(left);
-  lv_label_set_text(urlLab, "URL");
-  lv_obj_set_style_text_color(urlLab, COLOR_DIM, 0);
-  lv_obj_align(urlLab, LV_ALIGN_TOP_LEFT, 0, 0);
-
-  lv_obj_t* urlDisplay = lv_label_create(left);
-  lv_label_set_long_mode(urlDisplay, LV_LABEL_LONG_DOT);
-  lv_obj_set_width(urlDisplay, 230);
-  lv_label_set_text(urlDisplay, link->url.c_str());
-  lv_obj_set_style_text_color(urlDisplay, COLOR_DIM, 0);
-  lv_obj_align(urlDisplay, LV_ALIGN_TOP_LEFT, 0, 12);
-
-  lv_obj_t* nameLab = lv_label_create(left);
-  lv_label_set_text(nameLab, "NAME");
-  lv_obj_set_style_text_color(nameLab, COLOR_DIM, 0);
-  lv_obj_align(nameLab, LV_ALIGN_TOP_LEFT, 0, 30);
-
-  g_editCtx->nameDisplay = lv_label_create(left);
-  lv_obj_set_style_bg_color(g_editCtx->nameDisplay, COLOR_ROW, 0);
-  lv_obj_set_style_bg_opa(g_editCtx->nameDisplay, LV_OPA_COVER, 0);
-  lv_obj_set_style_border_width(g_editCtx->nameDisplay, 1, 0);
-  lv_obj_set_style_border_color(g_editCtx->nameDisplay, COLOR_ACCENT, 0);
-  lv_obj_set_style_pad_hor(g_editCtx->nameDisplay, 4, 0);
-  lv_obj_set_style_pad_ver(g_editCtx->nameDisplay, 1, 0);
-  lv_obj_set_style_text_color(g_editCtx->nameDisplay, COLOR_FG, 0);
-  lv_obj_set_width(g_editCtx->nameDisplay, 230);
-  lv_label_set_text(g_editCtx->nameDisplay, g_editCtx->nameBuffer.c_str());
-  lv_obj_align(g_editCtx->nameDisplay, LV_ALIGN_TOP_LEFT, 0, 42);
+  g_editCtx->urlDisplay      = buildField(left, "URL",  0,  0);
+  g_editCtx->nameDisplay     = buildField(left, "NAME", 18, 1);
+  g_editCtx->usernameDisplay = buildField(left, "USER", 36, 2);
+  g_editCtx->passwordDisplay = buildField(left, "PASS", 54, 3);
 
   lv_obj_t* catLab = lv_label_create(left);
   lv_label_set_text(catLab, "CATEGORY");
   lv_obj_set_style_text_color(catLab, COLOR_DIM, 0);
-  lv_obj_align(catLab, LV_ALIGN_TOP_LEFT, 0, 64);
+  lv_obj_set_pos(catLab, 0, 74);
 
   g_editCtx->pillsContainer = lv_obj_create(left);
-  lv_obj_set_size(g_editCtx->pillsContainer, 230, 40);
-  lv_obj_set_pos(g_editCtx->pillsContainer, 0, 76);
+  lv_obj_set_size(g_editCtx->pillsContainer, 230, 42);
+  lv_obj_set_pos(g_editCtx->pillsContainer, 0, 84);
   lv_obj_set_style_bg_opa(g_editCtx->pillsContainer, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_width(g_editCtx->pillsContainer, 0, 0);
   lv_obj_set_style_pad_all(g_editCtx->pillsContainer, 0, 0);
   lv_obj_set_style_pad_gap(g_editCtx->pillsContainer, 2, 0);
   lv_obj_set_flex_flow(g_editCtx->pillsContainer, LV_FLEX_FLOW_ROW_WRAP);
   lv_obj_set_scroll_dir(g_editCtx->pillsContainer, LV_DIR_VER);
+
+  // Populate all fields and set initial focus indicator
+  renderAllFields();
+  setFocus(g_editCtx->focusedField);
   buildLinkPills();
 
   // Right column: QWERTY keyboard
@@ -227,25 +292,23 @@ void editLink(Link* link, std::function<void()> onClose) {
   UI::QwertyCallbacks cbs;
   cbs.onChar = [](char c){
     App::notifyActivity();
-    g_editCtx->nameBuffer += c;
-    renderLinkName();
+    String* buf = activeBuffer();
+    if (buf) *buf += c;
+    renderAllFields();
   };
   cbs.onDelete = [](){
     App::notifyActivity();
-    if (g_editCtx->nameBuffer.length() > 0) {
-      g_editCtx->nameBuffer.remove(g_editCtx->nameBuffer.length() - 1);
-      renderLinkName();
-    }
+    String* buf = activeBuffer();
+    if (buf && buf->length() > 0) buf->remove(buf->length() - 1);
+    renderAllFields();
   };
-  cbs.onOk = [](){  // OK = SAVE
-    saveLinkEdit();
-  };
+  cbs.onOk = [](){ saveLinkEdit(); };
   UI::buildQwerty(kb, cbs);
 
-  // Bottom button row: CANCEL / DELETE / TRANSMIT / SAVE
+  // Bottom button row: CANCEL / DELETE / TRANSMIT / LOGIN / SAVE
   const struct { const char* label; lv_color_t color; int x; int w; void(*cb)(lv_event_t*); } btns[] = {
-    {"CANCEL", COLOR_FG, 0, 100, [](lv_event_t*){ closeLinkEdit(false); }},
-    {"DELETE", COLOR_ACCENT, 102, 100, [](lv_event_t*){
+    {"CANCEL",  COLOR_FG,     0,   96, [](lv_event_t*){ closeLinkEdit(false); }},
+    {"DELETE",  COLOR_ACCENT, 98,  96, [](lv_event_t*){
       Link* l = g_editCtx->link;
       String name = l->name;
       UI::confirmDialog("// CONFIRM", ("Delete \"" + name + "\"?").c_str(), "DELETE", true,
@@ -261,14 +324,20 @@ void editLink(Link* link, std::function<void()> onClose) {
           closeLinkEdit(true);
         });
     }},
-    {"TRANSMIT", COLOR_GREEN, 204, 100, [](lv_event_t*){
+    {"TRANSMIT", COLOR_GREEN, 196, 96, [](lv_event_t*){
       String url = g_editCtx->link->url;
       closeLinkEdit(false);
       uiTransmit_url(url);
     }},
-    {"SAVE", COLOR_GREEN, 306, 100, [](lv_event_t*){ saveLinkEdit(); }},
+    {"LOGIN",   COLOR_GREEN,  294, 96, [](lv_event_t*){
+      String u = g_editCtx->link->username;
+      String p = g_editCtx->link->password;
+      closeLinkEdit(false);
+      uiTransmit_creds(u, p);
+    }},
+    {"SAVE",    COLOR_GREEN,  392, 96, [](lv_event_t*){ saveLinkEdit(); }},
   };
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < 5; i++) {
     lv_obj_t* b = lv_btn_create(g_editCtx->overlay);
     lv_obj_set_size(b, btns[i].w, 18);
     lv_obj_set_pos(b, btns[i].x, 152);
@@ -451,9 +520,7 @@ void editCategory(Category* cat, bool isNew, std::function<void()> onClose) {
       renderCatName();
     }
   };
-  cbs.onOk = [](){
-    doSaveCat();
-  };
+  cbs.onOk = [](){ doSaveCat(); };
   UI::buildQwerty(kb, cbs);
 
   // Buttons: CANCEL / DELETE (only if !isNew) / SAVE

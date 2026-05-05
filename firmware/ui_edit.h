@@ -7,9 +7,8 @@
 #include <functional>
 
 namespace UIEdit {
-  // Open the edit overlay for an existing link.
-  // After save/delete, calls onClose() so the list can re-render.
-  void editLink(Link* link, std::function<void()> onClose);
+  // Open the edit overlay for a link. isNew=true means cancel should erase it.
+  void editLink(Link* link, std::function<void()> onClose, bool isNew = false);
 
   // Edit existing category (or create new if isNew=true)
   void editCategory(Category* cat, bool isNew, std::function<void()> onClose);

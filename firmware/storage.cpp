@@ -68,11 +68,11 @@ static void seedFirstBoot() {
   decoy.name = "bookmarks"; decoy.pin = DEFAULT_PIN_DECOY; decoy.isDecoy = true;
   decoy.categories.push_back({"misc",   0xFFB000});
   decoy.categories.push_back({"videos", 0x00FF41});
-  decoy.links.push_back({"wikipedia", "https://wikipedia.org",   "misc",   0, 0});
-  decoy.links.push_back({"weather",   "https://weather.com",     "misc",   0, 0});
-  decoy.links.push_back({"youtube",   "https://youtube.com",     "videos", 0, 0});
-  decoy.links.push_back({"maps",      "https://maps.google.com", "misc",   0, 0});
-  decoy.links.push_back({"amazon",    "https://amazon.com",      "misc",   0, 0});
+  decoy.links.push_back({"wikipedia", "https://wikipedia.org",   "", "", "misc",   0, 0});
+  decoy.links.push_back({"weather",   "https://weather.com",     "", "", "misc",   0, 0});
+  decoy.links.push_back({"youtube",   "https://youtube.com",     "", "", "videos", 0, 0});
+  decoy.links.push_back({"maps",      "https://maps.google.com", "", "", "misc",   0, 0});
+  decoy.links.push_back({"amazon",    "https://amazon.com",      "", "", "misc",   0, 0});
   decoy.settings = { true, 5 };
   v.push_back(decoy);
 
@@ -133,6 +133,8 @@ bool loadVaults(std::vector<Vault>& out) {
       Link l;
       l.name      = String((const char*)lo["name"]);
       l.url       = String((const char*)lo["url"]);
+      l.username  = String((const char*)(lo["username"] | ""));
+      l.password  = String((const char*)(lo["password"] | ""));
       l.cat       = String((const char*)lo["cat"]);
       l.lastUsed  = lo["lastUsed"]  | 0;
       l.timesUsed = lo["timesUsed"] | 0;
@@ -166,6 +168,8 @@ bool saveVaults(const std::vector<Vault>& vaults) {
       JsonObject lo = lnks.createNestedObject();
       lo["name"]      = l.name;
       lo["url"]       = l.url;
+      lo["username"]  = l.username;
+      lo["password"]  = l.password;
       lo["cat"]       = l.cat;
       lo["lastUsed"]  = l.lastUsed;
       lo["timesUsed"] = l.timesUsed;

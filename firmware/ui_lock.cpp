@@ -58,6 +58,8 @@ static lv_obj_t* scrNewPin;
 static lv_obj_t* newPinLabel;
 static lv_obj_t* newPinHint;
 static String newPinBuffer = "";
+static String g_pendingPin = "";
+static bool   g_pinConfirmPhase = false;
 static Vault* recoveryTargetVault = nullptr;
 
 // Forward declarations within this file
@@ -548,6 +550,9 @@ static void buildRecoveryScreen() {
       recoveryBuffer = "";
       recoveryStoredMasterAttempt = "";
       newPinBuffer = "";
+      g_pendingPin = "";
+      g_pinConfirmPhase = false;
+      lv_label_set_text(newPinHint, "> enter new 4-digit pin");
       renderNewPin();
       App::state = STATE_NEW_PIN;
       UI::wipeTransition(scrNewPin);
@@ -650,14 +655,52 @@ static void renderNewPin() {
 static void onNewPinKey(const char* k) {
   App::notifyActivity();
   if (strcmp(k, "DEL") == 0) {
-    if (newPinBuffer.length() > 0) newPinBuffer.remove(newPinBuffer.length() - 1);
+    if (newPinBuffer.length() > 0) {
+      newPinBuffer.remove(newPinBuffer.length() - 1);
+    } else if (g_pinConfirmPhase) {
+      // Back out of confirm phase, restart from first entry
+      g_pendingPin = "";
+      g_pinConfirmPhase = false;
+      lv_label_set_text(newPinHint, "> enter new 4-digit pin");
+    }
   } else if (strcmp(k, "OK") == 0) {
     if (newPinBuffer.length() != PIN_LENGTH) return;
+
+    if (!g_pinConfirmPhase) {
+      // Phase 1: store candidate, ask for confirmation
+      g_pendingPin = newPinBuffer;
+      g_pinConfirmPhase = true;
+      newPinBuffer = "";
+      lv_label_set_text(newPinHint, "> confirm new pin");
+      renderNewPin();
+      return;
+    }
+
+    // Phase 2: compare against stored candidate
+    if (newPinBuffer != g_pendingPin) {
+      lv_obj_set_style_text_color(newPinLabel, COLOR_ACCENT, 0);
+      UI::glitchLabel(newPinLabel, "MISMATCH", 500);
+      newPinBuffer = "";
+      g_pendingPin = "";
+      g_pinConfirmPhase = false;
+      lv_timer_t* t = lv_timer_create([](lv_timer_t* tm){
+        lv_label_set_text(newPinHint, "> enter new 4-digit pin");
+        renderNewPin();
+        lv_timer_del(tm);
+      }, 900, nullptr);
+      lv_timer_set_repeat_count(t, 1);
+      return;
+    }
+
+    // PINs match — check for conflicts then save
     if (!Vaults::pinIsAvailable(newPinBuffer, recoveryTargetVault)) {
       lv_obj_set_style_text_color(newPinLabel, COLOR_ACCENT, 0);
       UI::glitchLabel(newPinLabel, "CONFLICT", 500);
       newPinBuffer = "";
+      g_pendingPin = "";
+      g_pinConfirmPhase = false;
       lv_timer_t* t = lv_timer_create([](lv_timer_t* tm){
+        lv_label_set_text(newPinHint, "> enter new 4-digit pin");
         renderNewPin();
         lv_timer_del(tm);
       }, 900, nullptr);
@@ -666,9 +709,11 @@ static void onNewPinKey(const char* k) {
     }
     recoveryTargetVault->pin = newPinBuffer;
     Vaults::persist();
+    newPinBuffer = "";
+    g_pendingPin = "";
+    g_pinConfirmPhase = false;
     lv_label_set_text(newPinLabel, "UPDATED");
     lv_obj_set_style_text_color(newPinLabel, COLOR_GREEN, 0);
-    newPinBuffer = "";
     lv_timer_t* t = lv_timer_create([](lv_timer_t* tm){
       uiLock_show();
       lv_timer_del(tm);

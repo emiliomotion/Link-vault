@@ -120,13 +120,24 @@ static void buildList() {
   lv_obj_set_style_text_color(battLabel, COLOR_GREEN, 0);
   lv_obj_align(battLabel, LV_ALIGN_RIGHT_MID, -160, 0);
 
-  // Buttons: SRCH / CFG / LOCK
+  // Buttons: + / SRCH / CFG / LOCK
   struct { const char* label; lv_color_t color; int xRight; void(*cb)(lv_event_t*); } btns[] = {
-    {"SRCH", COLOR_FG, -110, [](lv_event_t*){ openSearch(); }},
-    {"CFG",  COLOR_FG,  -68, [](lv_event_t*){ uiConfig_show(); }},
-    {"LOCK", COLOR_ACCENT, -2, [](lv_event_t*){ App::lockNow(); }},
+    {"+",    COLOR_GREEN,   -152, [](lv_event_t*){
+      if (!App::currentVault) return;
+      Link newLink;
+      newLink.name = "new link";
+      newLink.cat  = (App::activeCategory != "ALL") ? App::activeCategory : "";
+      App::currentVault->links.push_back(newLink);
+      UIEdit::editLink(&App::currentVault->links.back(), [](){
+        renderTabStrip();
+        renderRows();
+      }, true);
+    }},
+    {"SRCH", COLOR_FG,     -110, [](lv_event_t*){ openSearch(); }},
+    {"CFG",  COLOR_FG,      -68, [](lv_event_t*){ uiConfig_show(); }},
+    {"LOCK", COLOR_ACCENT,   -2, [](lv_event_t*){ App::lockNow(); }},
   };
-  for (int i = 0; i < 3; i++) {
+  for (int i = 0; i < 4; i++) {
     lv_obj_t* b = lv_btn_create(bar);
     lv_obj_set_size(b, btns[i].label[0]=='L' ? 60 : 40, 18);
     lv_obj_align(b, LV_ALIGN_RIGHT_MID, btns[i].xRight, 0);
@@ -411,6 +422,54 @@ void uiTransmit_url(const String& url) {
   }
 
   // Auto-dismiss
+  lv_timer_t* t = lv_timer_create([](lv_timer_t* tm){
+    lv_obj_del((lv_obj_t*)tm->user_data);
+    lv_timer_del(tm);
+  }, 1400, ov);
+  lv_timer_set_repeat_count(t, 1);
+}
+
+// =========================================================================
+//  TRANSMIT CREDENTIALS (username Tab password) OVER BLE
+// =========================================================================
+void uiTransmit_creds(const String& username, const String& password) {
+  if (!bleKeyboard.isConnected()) {
+    UI::toast("!! BLE OFFLINE !!", COLOR_ACCENT);
+    return;
+  }
+  if (username.length() == 0 && password.length() == 0) {
+    UI::toast("no credentials stored", COLOR_ACCENT);
+    return;
+  }
+
+  lv_obj_t* ov = lv_obj_create(lv_layer_top());
+  lv_obj_set_size(ov, SCREEN_W, SCREEN_H);
+  lv_obj_set_pos(ov, 0, 0);
+  lv_obj_set_style_bg_color(ov, COLOR_BG, 0);
+  lv_obj_set_style_bg_opa(ov, LV_OPA_90, 0);
+  lv_obj_set_style_border_width(ov, 0, 0);
+  lv_obj_clear_flag(ov, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+
+  lv_obj_t* lab = lv_label_create(ov);
+  lv_obj_set_style_text_font(lab, FONT_LARGE, 0);
+  lv_obj_set_style_text_color(lab, COLOR_GREEN, 0);
+  lv_label_set_text(lab, ">> LOGIN <<");
+  lv_obj_align(lab, LV_ALIGN_CENTER, 0, -12);
+  UI::glitchLabel(lab, ">> LOGIN <<", 800);
+
+  lv_obj_t* sub = lv_label_create(ov);
+  lv_obj_set_style_text_color(sub, COLOR_DIM, 0);
+  lv_label_set_text(sub, username.length() ? username.c_str() : "(no username)");
+  lv_obj_align(sub, LV_ALIGN_CENTER, 0, 20);
+
+  delay(250);
+  if (username.length() > 0) bleKeyboard.print(username.c_str());
+  if (username.length() > 0 && password.length() > 0) bleKeyboard.write(KEY_TAB);
+  if (password.length() > 0) bleKeyboard.print(password.c_str());
+  if (App::currentVault && App::currentVault->settings.autoEnter) {
+    bleKeyboard.write(KEY_RETURN);
+  }
+
   lv_timer_t* t = lv_timer_create([](lv_timer_t* tm){
     lv_obj_del((lv_obj_t*)tm->user_data);
     lv_timer_del(tm);
