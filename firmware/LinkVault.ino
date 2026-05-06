@@ -82,6 +82,58 @@ static void checkAutoLock() {
 }
 
 // =========================================================================
+//  PANIC CLOSE — double-tap the vault title → sends Ctrl+W to close the
+//  active incognito tab on whatever device is currently connected via BLE.
+//  Works on Windows (Chrome/Edge) and Android (Chrome, one tab).
+//  The topbar title zone (x<200, y<22) has no buttons so accidental
+//  triggers from normal use are not possible.
+//  NOTE: the CST816S touch IC on this board is single-touch only, so
+//  two-finger simultaneous detection is not possible in hardware.
+// =========================================================================
+static uint32_t s_panicLastTapMs  = 0;
+static bool     s_panicPrevPressed = false;
+
+static void doPanicClose() {
+  if (!bleKeyboard.isConnected()) {
+    UI::toast("!! BLE OFFLINE !!", COLOR_ACCENT);
+    return;
+  }
+  UI::toast("// INCOGNITO CLOSED", COLOR_GREEN);
+  bleKeyboard.press(KEY_LEFT_CTRL);
+  bleKeyboard.press('w');
+  bleKeyboard.releaseAll();
+}
+
+static void checkPanicGesture() {
+  if (App::state != STATE_LIST && App::state != STATE_CONFIG) {
+    s_panicPrevPressed = false;
+    return;
+  }
+
+  lv_indev_t* indev = lv_indev_get_next(NULL);
+  while (indev && lv_indev_get_type(indev) != LV_INDEV_TYPE_POINTER) {
+    indev = lv_indev_get_next(indev);
+  }
+  if (!indev) return;
+
+  lv_point_t pt;
+  lv_indev_get_point(indev, &pt);
+  bool pressed = (lv_indev_get_state(indev) == LV_INDEV_STATE_PRESSED);
+
+  if (pressed && !s_panicPrevPressed && pt.x < 200 && pt.y < 22) {
+    uint32_t now = millis();
+    if (now - s_panicLastTapMs < 350) {
+      s_panicLastTapMs = 0;
+      s_panicPrevPressed = pressed;
+      doPanicClose();
+      return;
+    }
+    s_panicLastTapMs = now;
+  }
+  s_panicPrevPressed = pressed;
+}
+
+// =========================================================================
 //  SETUP
 // =========================================================================
 void setup() {
@@ -133,5 +185,6 @@ void loop() {
   lv_timer_handler();
   bleProximity_tick();
   checkAutoLock();
+  checkPanicGesture();
   delay(5);
 }
