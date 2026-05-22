@@ -23,6 +23,12 @@
 #include "ui_common.h"
 #include "ui_qwerty.h"
 
+// Waveshare ESP32-S3-Touch-LCD-3.49 driver files (copy from demo project)
+#include "user_config.h"
+#include "lvgl_port.h"
+#include "i2c_bsp.h"
+#include "src/lcd_bl_bsp/lcd_bl_pwm_bsp.h"
+
 // --- Forward declarations from screen modules (Message 2 of 3) -----------
 extern void uiBoot_build();
 extern void uiBoot_show();
@@ -143,14 +149,10 @@ void setup() {
   Serial.println("==  LINK VAULT boot");
   Serial.println("==========================================");
 
-  // -----------------------------------------------------------------
-  // *** WAVESHARE DISPLAY/TOUCH/LVGL INITS GO HERE ***
-  // Copy these calls from the Waveshare ESP32-S3-Touch-LCD-3.49
-  // demo project. Typical names (varies by demo revision):
-  //   axs15231_init();        // display driver
-  //   touch_init();           // I2C touch controller
-  //   lvgl_init();            // LVGL display & input device registration
-  // -----------------------------------------------------------------
+  // Waveshare display/touch/LVGL initialization
+  i2c_master_Init();
+  lvgl_port_init();
+  lcd_bl_pwm_bsp_init(LCD_PWM_MODE_255);
 
   if (!Storage::begin()) {
     Serial.println("[FATAL] Storage init failed");
