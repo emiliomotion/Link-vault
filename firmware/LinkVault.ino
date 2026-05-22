@@ -110,15 +110,15 @@ static void checkPanicGesture() {
     return;
   }
 
-  lv_indev_t* indev = lv_indev_get_next(NULL);
-  while (indev && lv_indev_get_type(indev) != LV_INDEV_TYPE_POINTER) {
-    indev = lv_indev_get_next(indev);
+  lv_indev_t* indev = lv_indev_get_act();
+  if (!indev || lv_indev_get_type(indev) != LV_INDEV_TYPE_POINTER) {
+    s_panicPrevPressed = false;
+    return;
   }
-  if (!indev) return;
 
   lv_point_t pt;
   lv_indev_get_point(indev, &pt);
-  bool pressed = (lv_indev_get_state(indev) == LV_INDEV_STATE_PRESSED);
+  bool pressed = true; // lv_indev_get_act() only returns non-null when actively pressed
 
   if (pressed && !s_panicPrevPressed && pt.x < 200 && pt.y < 22) {
     uint32_t now = millis();

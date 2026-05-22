@@ -338,7 +338,7 @@ static void renderRows() {
       lv_obj_set_style_border_color(pill, lv_color_hex(color), 0);
       lv_obj_set_style_radius(pill, 0, 0);
       lv_obj_set_style_shadow_width(pill, 0, 0);
-      lv_obj_set_style_margin_right(pill, 4, 0);
+      lv_obj_set_style_pad_right(pill, 4, 0);
       lv_obj_t* pl = lv_label_create(pill);
       lv_label_set_text(pl, lp->cat.c_str());
       lv_obj_set_style_text_color(pl, lv_color_hex(color), 0);
