@@ -79,15 +79,6 @@ public:
     Serial.printf("[Pair] Incoming connect from %s\n", mac.c_str());
   }
 
-  uint32_t onPassKeyRequest() override {
-    return g_pairCode;
-  }
-
-  bool onConfirmPIN(const NimBLEConnInfo& connInfo, uint32_t pin) override {
-    Serial.printf("[Pair] Confirm PIN: %u (expected %u)\n", pin, g_pairCode);
-    return pin == g_pairCode;
-  }
-
   void onAuthenticationComplete(NimBLEConnInfo& connInfo) override {
     if (!connInfo.isBonded()) {
       Serial.println("[Pair] Authentication failed");
