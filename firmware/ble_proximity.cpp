@@ -47,9 +47,9 @@ static uint32_t g_pairStartMs   = 0;
 // =========================================================================
 //  SCAN CALLBACK
 // =========================================================================
-class ProximityScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
+class ProximityScanCallbacks : public NimBLEScanCallbacks {
 public:
-  void onResult(NimBLEAdvertisedDevice* dev) override {
+  void onResult(const NimBLEAdvertisedDevice* dev) override {
     String mac = String(dev->getAddress().toString().c_str());
     mac.toLowerCase();
     int8_t rssi = dev->getRSSI();
@@ -73,14 +73,9 @@ static ProximityScanCallbacks scanCb;
 // =========================================================================
 class PairingServerCallbacks : public NimBLEServerCallbacks {
 public:
-  void onConnect(NimBLEServer* server, ble_gap_conn_desc* desc) override {
+  void onConnect(NimBLEServer* server, NimBLEConnInfo& connInfo) override {
     if (!g_pairing) return;
-    char addr[20];
-    snprintf(addr, sizeof(addr), "%02x:%02x:%02x:%02x:%02x:%02x",
-             desc->peer_id_addr.val[5], desc->peer_id_addr.val[4],
-             desc->peer_id_addr.val[3], desc->peer_id_addr.val[2],
-             desc->peer_id_addr.val[1], desc->peer_id_addr.val[0]);
-    String mac = String(addr);
+    String mac = String(connInfo.getAddress().toString().c_str());
     Serial.printf("[Pair] Incoming connect from %s\n", mac.c_str());
   }
 
@@ -88,22 +83,17 @@ public:
     return g_pairCode;
   }
 
-  bool onConfirmPIN(uint32_t pin) override {
+  bool onConfirmPIN(const NimBLEConnInfo& connInfo, uint32_t pin) override {
     Serial.printf("[Pair] Confirm PIN: %u (expected %u)\n", pin, g_pairCode);
     return pin == g_pairCode;
   }
 
-  void onAuthenticationComplete(ble_gap_conn_desc* desc) override {
-    if (!desc->sec_state.bonded) {
+  void onAuthenticationComplete(NimBLEConnInfo& connInfo) override {
+    if (!connInfo.isBonded()) {
       Serial.println("[Pair] Authentication failed");
       return;
     }
-    char addr[20];
-    snprintf(addr, sizeof(addr), "%02x:%02x:%02x:%02x:%02x:%02x",
-             desc->peer_id_addr.val[5], desc->peer_id_addr.val[4],
-             desc->peer_id_addr.val[3], desc->peer_id_addr.val[2],
-             desc->peer_id_addr.val[1], desc->peer_id_addr.val[0]);
-    String mac = String(addr); mac.toLowerCase();
+    String mac = String(connInfo.getAddress().toString().c_str()); mac.toLowerCase();
     Serial.printf("[Pair] BONDED with %s\n", mac.c_str());
     Storage::addBondedAddress(mac);
     g_bonded = Storage::loadBondedAddresses();
@@ -127,7 +117,7 @@ void bleProximity_begin() {
 
 static void runScanOnce() {
   NimBLEScan* scan = NimBLEDevice::getScan();
-  scan->setAdvertisedDeviceCallbacks(&scanCb, false);
+  scan->setScanCallbacks(&scanCb, false);
   scan->setActiveScan(false);   // passive = lower power
   scan->setInterval(100);
   scan->setWindow(99);
@@ -193,7 +183,7 @@ void bleProximity_unbond(const String& macAddr) {
   g_bonded = Storage::loadBondedAddresses();
 
   // Also remove from NimBLE bond store
-  NimBLEAddress addr(m.c_str());
+  NimBLEAddress addr(m.c_str(), BLE_ADDR_PUBLIC);
   NimBLEDevice::deleteBond(addr);
 }
 
